@@ -54,6 +54,15 @@ std::string type_code<float>(){
 }
 
 
+std::uint32_t map_color(SAMP_TYPE x, SAMP_TYPE xmin, SAMP_TYPE xmax){
+    auto y=x/xmax;
+    uint32_t r=y*255;
+    uint32_t g=y*255;
+    uint32_t b=y*255;
+    return (0xFF000000|(r<<16)|(g<<8)|b);
+}
+
+
 struct DataFrame{
     std::size_t count;
     std::vector<std::complex<SAMP_TYPE>> payload;
@@ -109,6 +118,8 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
     std::make_shared<DataFrame>(0, std::vector<std::complex<SAMP_TYPE>>(samps_per_buff))
     };
 
+    
+
     unsigned long long num_total_samps = 0;
     // create a receive streamer
     uhd::stream_args_t stream_args(type_code<SAMP_TYPE>(), wire_format);
@@ -141,6 +152,36 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
 
     
     std::thread th_proc([&]{
+        if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't initialize SDL: %s\n", SDL_GetError());
+            return;
+        }
+        SDL_Window *window=SDL_CreateWindow("waterfall",
+                              SDL_WINDOWPOS_UNDEFINED,
+                              SDL_WINDOWPOS_UNDEFINED,
+                              800,600,
+                              SDL_WINDOW_RESIZABLE);
+
+        if (!window) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't set create window: %s\n", SDL_GetError());
+            return;
+        }
+        SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, 0);
+        if (!renderer) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't set create renderer: %s\n", SDL_GetError());
+            return;
+        }
+
+        SDL_Texture *waterfallTexture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, nch, batch);
+
+        if (!waterfallTexture) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't set create texture: %s\n", SDL_GetError());
+            return;
+        }
+
+
+
+
         stop_signal_called=false;
         std::cerr<<stop_signal_called<<std::endl;
         int n[]={(int)nch};
@@ -173,12 +214,54 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
             fftwf_execute_dft(plan, (fftwf_complex*)data->payload.data(), (fftwf_complex*)data->payload.data());
             fft_shift(data->payload, nch, batch);
             auto display_data=minmax(data->payload);
+
             std::cerr<<i<<" "<<data->count<<" "<<std::get<0>(display_data)<<" "<<std::get<1>(display_data)<<std::endl;
+            SAMP_TYPE max_value=std::get<1>(display_data);
+            SAMP_TYPE min_value=std::get<0>(display_data);
+            std::vector<SAMP_TYPE>& dd=std::get<2>(display_data);
+
             //std::ofstream ofs("a.bin");
             //ofs.write((char*)data->payload.data(), sizeof(std::complex<float>)*data->payload.size());
             //ofs.close();
+            SDL_Event event;
+
+            while (SDL_PollEvent(&event)) {
+                switch (event.type) {
+                case SDL_KEYDOWN:
+                    if (event.key.keysym.sym == SDLK_ESCAPE) {
+                        stop_signal_called = true;
+                    }
+                    break;
+                case SDL_QUIT:
+                    stop_signal_called = true;
+                    break;
+                }
+            }
+
+
+            size_t idx=0;
+            void *pixels;
+            int pitch;
+            if (SDL_LockTexture(waterfallTexture, NULL, &pixels, &pitch) < 0) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't lock texture: %s\n", SDL_GetError());
+                return;
+            }
+
+            for(int i=0;i<batch;++i){
+                auto dst = (std::uint32_t*)((std::uint8_t*)pixels + i * pitch);
+                for(int j=0;j<nch;++j){
+                    std::uint32_t color=map_color(dd[idx++], min_value, max_value);
+                    *dst++=color;
+                }
+            }
+            SDL_UnlockTexture(waterfallTexture);
+
+            SDL_RenderClear(renderer);
+            SDL_RenderCopy(renderer, waterfallTexture, NULL, NULL);
+            SDL_RenderPresent(renderer);
         }
         fftwf_destroy_plan(plan);
+        SDL_DestroyRenderer(renderer);
     });
 
 

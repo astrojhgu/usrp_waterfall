@@ -54,6 +54,35 @@ std::string type_code<float>(){
 }
 
 
+struct DataFrame{
+    std::size_t count;
+    std::vector<std::complex<SAMP_TYPE>> payload;
+
+    DataFrame(std::size_t c, std::vector<std::complex<SAMP_TYPE>>&& _payload)
+    :count(c), payload(_payload)
+    {}
+};
+
+
+std::tuple<float,float, std::vector<SAMP_TYPE>> minmax(const std::vector<std::complex<SAMP_TYPE>>& data){
+    std::vector<SAMP_TYPE> ampl(data.size());
+    SAMP_TYPE min_value=1e99;
+    SAMP_TYPE max_value=-1e99;
+    for(int i=0;i<data.size();++i){
+        
+        ampl[i]=std::norm(data[i]);
+        auto x=ampl[i];
+        if (min_value>x){
+            min_value=x;
+        }
+        if (max_value<x){
+            max_value=x;
+        }
+    }
+    return std::make_tuple(min_value, max_value, ampl);
+}
+
+
 
 static std::atomic_bool stop_signal_called(false);
 void sig_int_handler(int s)
@@ -75,9 +104,9 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
 {
     size_t samps_per_buff=nch*batch;
 
-    BufQ<std::vector<std::complex<SAMP_TYPE>>> bufq{std::make_shared<std::vector<std::complex<SAMP_TYPE>>>(samps_per_buff),
-    std::make_shared<std::vector<std::complex<SAMP_TYPE>>>(samps_per_buff),
-    std::make_shared<std::vector<std::complex<SAMP_TYPE>>>(samps_per_buff),
+    BufQ<DataFrame> bufq{std::make_shared<DataFrame>(0, std::vector<std::complex<SAMP_TYPE>>(samps_per_buff)),
+    std::make_shared<DataFrame>(0, std::vector<std::complex<SAMP_TYPE>>(samps_per_buff)),
+    std::make_shared<DataFrame>(0, std::vector<std::complex<SAMP_TYPE>>(samps_per_buff))
     };
 
     unsigned long long num_total_samps = 0;
@@ -131,27 +160,36 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
                              FFTW_FORWARD, FFTW_ESTIMATE);
 
 
+        
+        size_t prev_cnt=0;
+
         for(int i=0;!stop_signal_called;++i){
-            std::cerr<<i<<std::endl;
             auto data=bufq.fetch();
-            fftwf_execute_dft(plan, (fftwf_complex*)data->data(), (fftwf_complex*)data->data());
-            fft_shift(*data, nch, batch);
-            std::ofstream ofs("a.bin");
-            ofs.write((char*)data->data(), sizeof(std::complex<float>)*data->size());
-            ofs.close();
+            if (data->count>prev_cnt+1){
+                std::cerr<<"Dropping packet"<<std::endl;
+            }
+            
+            prev_cnt=data->count;
+            fftwf_execute_dft(plan, (fftwf_complex*)data->payload.data(), (fftwf_complex*)data->payload.data());
+            fft_shift(data->payload, nch, batch);
+            auto display_data=minmax(data->payload);
+            std::cerr<<i<<" "<<data->count<<" "<<std::get<0>(display_data)<<" "<<std::get<1>(display_data)<<std::endl;
+            //std::ofstream ofs("a.bin");
+            //ofs.write((char*)data->payload.data(), sizeof(std::complex<float>)*data->payload.size());
+            //ofs.close();
         }
         fftwf_destroy_plan(plan);
-        std::cerr<<"exit"<<std::endl;
     });
 
 
     std::thread th_acq([&]{
-    while (!stop_signal_called) {
+    for (size_t i=0;!stop_signal_called;++i) {
         const auto now = std::chrono::steady_clock::now();
         auto pbuf=bufq.prepare_write_buf();
+        pbuf->count=i;
 
         size_t num_rx_samps =
-            rx_stream->recv(&pbuf->front(), pbuf->size(), md, 1, false);
+            rx_stream->recv(&pbuf->payload.front(), pbuf->payload.size(), md, 1, false);
         bufq.submit();
 
         if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) {

@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+#define SHOW_GUI
 #include <uhd/exception.hpp>
 #include <uhd/types/tune_request.hpp>
 #include <uhd/usrp/multi_usrp.hpp>
@@ -53,14 +54,35 @@ std::string type_code<float>(){
     return "fc32";
 }
 
+SAMP_TYPE smooth_step(SAMP_TYPE x, SAMP_TYPE w){
+    constexpr SAMP_TYPE PI=3.14159265358979323846;
+    return (std::atan(x/w)+PI/2)/PI;
+}
 
 std::uint32_t map_color(SAMP_TYPE x, SAMP_TYPE xmin, SAMP_TYPE xmax){
     auto y=x/xmax;
-    uint32_t r=y*255;
-    uint32_t g=y*255;
-    uint32_t b=y*255;
+    uint32_t r=smooth_step(y-0.7, 0.2)*255;
+    uint32_t g=smooth_step(y-0.3, 0.2)*255;
+    uint32_t b=smooth_step(y-0.1, 0.2)*255;
     return (0xFF000000|(r<<16)|(g<<8)|b);
 }
+
+std::uint32_t rainbow(SAMP_TYPE x, SAMP_TYPE xmin, SAMP_TYPE xmax){
+    auto f=std::sqrt(x/xmax);
+    auto a=(1-f)/0.25;
+    auto X=(int)std::floor(a);
+    auto Y=(int)std::floor(255*(a-X));
+    std::uint32_t r, g, b;
+    switch (X){
+        case 0:r=255;g=Y;b=0;break;
+        case 1: r=255-Y;g=255;b=0;break;
+        case 2: r=0;g=255;b=Y;break;
+        case 3: r=0;g=255-Y;b=255;break;
+        case 4: r=0;g=0;b=255;break;
+    }
+    return (0xFF000000|(r<<16)|(g<<8)|b);
+}
+
 
 
 struct DataFrame{
@@ -119,6 +141,11 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
     };
 
     
+    BufQ<std::tuple<float,float, std::vector<SAMP_TYPE>>> display_data_q{
+        std::make_shared<std::tuple<float,float, std::vector<SAMP_TYPE>>>(std::make_tuple(0.0f, 0.0f, std::vector<SAMP_TYPE>())),
+        std::make_shared<std::tuple<float,float, std::vector<SAMP_TYPE>>>(std::make_tuple(0.0f, 0.0f, std::vector<SAMP_TYPE>())),
+        std::make_shared<std::tuple<float,float, std::vector<SAMP_TYPE>>>(std::make_tuple(0.0f, 0.0f, std::vector<SAMP_TYPE>())),
+    };
 
     unsigned long long num_total_samps = 0;
     // create a receive streamer
@@ -149,9 +176,8 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
     // Run this loop until either time expired (if a duration was given), until
     // the requested number of samples were collected (if such a number was
     // given), or until Ctrl-C was pressed.
-
-    
-    std::thread th_proc([&]{
+#ifdef SHOW_GUI
+    std::thread th_display([&]{
         if (SDL_Init(SDL_INIT_VIDEO) < 0) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't initialize SDL: %s\n", SDL_GetError());
             return;
@@ -180,8 +206,63 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
         }
 
 
+        for(;!stop_signal_called;)
+        {
+            auto display_data=display_data_q.fetch();
+
+            SAMP_TYPE max_value=std::get<1>(*display_data);
+            SAMP_TYPE min_value=std::get<0>(*display_data);
+            std::vector<SAMP_TYPE>& dd=std::get<2>(*display_data);
+
+            //std::ofstream ofs("a.bin");
+            //ofs.write((char*)data->payload.data(), sizeof(std::complex<float>)*data->payload.size());
+            //ofs.close();
+            SDL_Event event;
+
+            while (SDL_PollEvent(&event)) {
+                switch (event.type) {
+                case SDL_KEYDOWN:
+                    if (event.key.keysym.sym == SDLK_ESCAPE) {
+                        stop_signal_called = true;
+                    }
+                    break;
+                case SDL_QUIT:
+                    stop_signal_called = true;
+                    break;
+                }
+            }
 
 
+            size_t idx=0;
+            void *pixels;
+            int pitch;
+            if (SDL_LockTexture(waterfallTexture, NULL, &pixels, &pitch) < 0) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't lock texture: %s\n", SDL_GetError());
+                return;
+            }
+
+            for(int i=0;i<batch;++i){
+                auto dst = (std::uint32_t*)((std::uint8_t*)pixels + i * pitch);
+                for(int j=0;j<nch;++j){
+                    std::uint32_t color=rainbow(dd[idx++], min_value, max_value);
+                    *dst++=color;
+                }
+            }
+            SDL_UnlockTexture(waterfallTexture);
+
+            SDL_RenderClear(renderer);
+            SDL_RenderCopy(renderer, waterfallTexture, NULL, NULL);
+            SDL_RenderPresent(renderer);
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+
+        SDL_DestroyRenderer(renderer);
+    }
+    );
+#endif
+    
+    std::thread th_proc([&]{
+        
         stop_signal_called=false;
         std::cerr<<stop_signal_called<<std::endl;
         int n[]={(int)nch};
@@ -215,53 +296,16 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
             fft_shift(data->payload, nch, batch);
             auto display_data=minmax(data->payload);
 
+            auto pbuf=display_data_q.prepare_write_buf();
+            std::get<0>(*pbuf)=std::get<0>(display_data);
+            std::get<1>(*pbuf)=std::get<1>(display_data);
+            std::get<2>(*pbuf).swap(std::get<2>(display_data));
+            display_data_q.submit();
+
             std::cerr<<i<<" "<<data->count<<" "<<std::get<0>(display_data)<<" "<<std::get<1>(display_data)<<std::endl;
-            SAMP_TYPE max_value=std::get<1>(display_data);
-            SAMP_TYPE min_value=std::get<0>(display_data);
-            std::vector<SAMP_TYPE>& dd=std::get<2>(display_data);
-
-            //std::ofstream ofs("a.bin");
-            //ofs.write((char*)data->payload.data(), sizeof(std::complex<float>)*data->payload.size());
-            //ofs.close();
-            SDL_Event event;
-
-            while (SDL_PollEvent(&event)) {
-                switch (event.type) {
-                case SDL_KEYDOWN:
-                    if (event.key.keysym.sym == SDLK_ESCAPE) {
-                        stop_signal_called = true;
-                    }
-                    break;
-                case SDL_QUIT:
-                    stop_signal_called = true;
-                    break;
-                }
-            }
-
-
-            size_t idx=0;
-            void *pixels;
-            int pitch;
-            if (SDL_LockTexture(waterfallTexture, NULL, &pixels, &pitch) < 0) {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't lock texture: %s\n", SDL_GetError());
-                return;
-            }
-
-            for(int i=0;i<batch;++i){
-                auto dst = (std::uint32_t*)((std::uint8_t*)pixels + i * pitch);
-                for(int j=0;j<nch;++j){
-                    std::uint32_t color=map_color(dd[idx++], min_value, max_value);
-                    *dst++=color;
-                }
-            }
-            SDL_UnlockTexture(waterfallTexture);
-
-            SDL_RenderClear(renderer);
-            SDL_RenderCopy(renderer, waterfallTexture, NULL, NULL);
-            SDL_RenderPresent(renderer);
+            
         }
         fftwf_destroy_plan(plan);
-        SDL_DestroyRenderer(renderer);
     });
 
 
@@ -330,7 +374,11 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
     rx_stream->issue_stream_cmd(stream_cmd);
     });
     th_acq.join();
-    th_proc.join();    
+    th_proc.join();
+
+#ifdef SHOW_GUI
+    th_display.join();
+#endif
 }
 
 typedef std::function<uhd::sensor_value_t(const std::string&)> get_sensor_fn_t;

@@ -4,8 +4,6 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-
-//#define SHOW_GUI
 #include <uhd/exception.hpp>
 #include <uhd/types/tune_request.hpp>
 #include <uhd/usrp/multi_usrp.hpp>
@@ -147,12 +145,6 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
     // Run this loop until either time expired (if a duration was given), until
     // the requested number of samples were collected (if such a number was
     // given), or until Ctrl-C was pressed.
-#ifdef SHOW_GUI
-    std::thread th_display([&]{
-        
-    }
-    );
-#endif
 
     int shmid_daq_info = shmget(daq_info_key,sizeof(DaqInfo),0666|IPC_CREAT);
     int shmid_payload = shmget(payload_key, sizeof(float)*nch*batch*nbatch, 0666|IPC_CREAT);
@@ -246,10 +238,6 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
     });
     th_acq.join();
     th_proc.join();
-
-#ifdef SHOW_GUI
-    th_display.join();
-#endif
 
     shmdt(pdaq_info);
     shmdt(waterfall_payload_buf);

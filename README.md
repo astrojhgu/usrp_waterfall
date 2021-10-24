@@ -1,4 +1,15 @@
 # real-time waterfall diagram from USRP data acquisition
+## Purpose
+Performing USRP data acquisition and display waterfall diagram. New function may be added later.
+
+## Design
+This application is composed of two programs: `rt_waterfall` and `monitor`.
+
+### `rt_waterfall`
+This program is for performing data acquisition and FFT. The result is stored in a shared memory, which is to be read from other programs (currently `monitor`).
+
+### `monitor`
+It is the only visualization program by now. It reads the production of `rt_waterfall` and show the waterfall diagram on the screen.
 
 ## Dependencies
 1. SDL2

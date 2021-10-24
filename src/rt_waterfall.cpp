@@ -100,7 +100,9 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
     const size_t& channel,
     size_t nch,
     size_t batch, 
-    size_t nbatch
+    size_t nbatch,
+    float fcenter,
+    float bw
     )
 {
     size_t samps_per_buff=nch*batch;
@@ -162,6 +164,9 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
     pdaq_info->batch=batch;
     pdaq_info->nbatch=nbatch;
     pdaq_info->init_magic=INIT_MAGIC;
+    pdaq_info->fcenter=fcenter;
+    pdaq_info->bw=bw;
+
     auto handler=[&](const DataFrame& df){
         //std::vector<float> ampl(df.payload.size());
         int cnt=df.count;
@@ -454,7 +459,9 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         channel,                  \
         nch, 
         batch,
-        display_buf_nbatch
+        display_buf_nbatch,
+        freq,
+        rate
         );
 
 

@@ -8,5 +8,13 @@ stdenv.mkDerivation {
     fftwFloat.dev
     boost
     uhd
+    (python3.withPackages (ps: with ps; [
+    pip
+    numpy
+    scipy
+    matplotlib
+    ipython
+    sysv_ipc
+     ]))
     ];
 }

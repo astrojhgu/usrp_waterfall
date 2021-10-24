@@ -3,10 +3,12 @@
 constexpr uint32_t INIT_MAGIC=0x12345;
 
 struct DaqInfo{
-    size_t nch;
-    size_t batch;
-    size_t nbatch;
+    uint32_t nch;
+    uint32_t batch;
+    uint32_t nbatch;
     uint32_t init_magic;
+    float fcenter;
+    float bw;
 };
 
 

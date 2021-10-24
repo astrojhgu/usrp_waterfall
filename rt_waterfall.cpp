@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
-#define SHOW_GUI
+//#define SHOW_GUI
 #include <uhd/exception.hpp>
 #include <uhd/types/tune_request.hpp>
 #include <uhd/usrp/multi_usrp.hpp>
@@ -19,29 +19,24 @@
 #include <csignal>
 #include <fstream>
 #include <iostream>
+#include <sys/ipc.h>
+#include <sys/shm.h>
 #include <thread>
 #include <fftw3.h>
-#include <SDL2/SDL.h>
+
 #include "bufq.hpp"
-
-
-
+#include "config.hpp"
+#include "daq_queue.hpp"
+#include "utils.hpp"
+#include "data_proc.hpp"
+#include "shm_info.hpp"
+#include <functional>
 namespace po = boost::program_options;
-using SAMP_TYPE=float;
 
 template <typename T>
 std::string type_code(){
     assert(0);
     return "";
-}
-
-template <typename A>
-void fft_shift(A& data, size_t nch, size_t batch){
-    for(int i=0;i<batch;++i){
-        for(int j=0;j<nch/2;++j){
-            std::swap(data[i*nch+j], data[i*nch+j+nch/2]);
-        }
-    }
 }
 
 template <>
@@ -53,6 +48,8 @@ template <>
 std::string type_code<float>(){
     return "fc32";
 }
+
+
 
 SAMP_TYPE smooth_step(SAMP_TYPE x, SAMP_TYPE w){
     constexpr SAMP_TYPE PI=3.14159265358979323846;
@@ -85,35 +82,6 @@ std::uint32_t rainbow(SAMP_TYPE x, SAMP_TYPE xmin, SAMP_TYPE xmax){
 
 
 
-struct DataFrame{
-    std::size_t count;
-    std::vector<std::complex<SAMP_TYPE>> payload;
-
-    DataFrame(std::size_t c, std::vector<std::complex<SAMP_TYPE>>&& _payload)
-    :count(c), payload(_payload)
-    {}
-};
-
-
-std::tuple<float,float, std::vector<SAMP_TYPE>> minmax(const std::vector<std::complex<SAMP_TYPE>>& data){
-    std::vector<SAMP_TYPE> ampl(data.size());
-    SAMP_TYPE min_value=1e99;
-    SAMP_TYPE max_value=-1e99;
-    for(int i=0;i<data.size();++i){
-        
-        ampl[i]=std::norm(data[i]);
-        auto x=ampl[i];
-        if (min_value>x){
-            min_value=x;
-        }
-        if (max_value<x){
-            max_value=x;
-        }
-    }
-    return std::make_tuple(min_value, max_value, ampl);
-}
-
-
 
 static std::atomic_bool stop_signal_called(false);
 void sig_int_handler(int s)
@@ -122,15 +90,17 @@ void sig_int_handler(int s)
     if(s==15||s==9||s==2){
         stop_signal_called = true;
     }
-    
 }
+
+
 
 void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
     //const std::string& cpu_format,
     const std::string& wire_format,
     const size_t& channel,
     size_t nch,
-    size_t batch
+    size_t batch, 
+    size_t nbatch
     )
 {
     size_t samps_per_buff=nch*batch;
@@ -139,7 +109,6 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
     std::make_shared<DataFrame>(0, std::vector<std::complex<SAMP_TYPE>>(samps_per_buff)),
     std::make_shared<DataFrame>(0, std::vector<std::complex<SAMP_TYPE>>(samps_per_buff))
     };
-
     
     BufQ<std::tuple<float,float, std::vector<SAMP_TYPE>>> display_data_q{
         std::make_shared<std::tuple<float,float, std::vector<SAMP_TYPE>>>(std::make_tuple(0.0f, 0.0f, std::vector<SAMP_TYPE>())),
@@ -178,136 +147,33 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
     // given), or until Ctrl-C was pressed.
 #ifdef SHOW_GUI
     std::thread th_display([&]{
-        if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't initialize SDL: %s\n", SDL_GetError());
-            return;
-        }
-        SDL_Window *window=SDL_CreateWindow("waterfall",
-                              SDL_WINDOWPOS_UNDEFINED,
-                              SDL_WINDOWPOS_UNDEFINED,
-                              800,600,
-                              SDL_WINDOW_RESIZABLE);
-
-        if (!window) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't set create window: %s\n", SDL_GetError());
-            return;
-        }
-        SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, 0);
-        if (!renderer) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't set create renderer: %s\n", SDL_GetError());
-            return;
-        }
-
-        SDL_Texture *waterfallTexture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, nch, batch);
-
-        if (!waterfallTexture) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't set create texture: %s\n", SDL_GetError());
-            return;
-        }
-
-
-        for(;!stop_signal_called;)
-        {
-            auto display_data=display_data_q.fetch();
-
-            SAMP_TYPE max_value=std::get<1>(*display_data);
-            SAMP_TYPE min_value=std::get<0>(*display_data);
-            std::vector<SAMP_TYPE>& dd=std::get<2>(*display_data);
-
-            //std::ofstream ofs("a.bin");
-            //ofs.write((char*)data->payload.data(), sizeof(std::complex<float>)*data->payload.size());
-            //ofs.close();
-            SDL_Event event;
-
-            while (SDL_PollEvent(&event)) {
-                switch (event.type) {
-                case SDL_KEYDOWN:
-                    if (event.key.keysym.sym == SDLK_ESCAPE) {
-                        stop_signal_called = true;
-                    }
-                    break;
-                case SDL_QUIT:
-                    stop_signal_called = true;
-                    break;
-                }
-            }
-
-
-            size_t idx=0;
-            void *pixels;
-            int pitch;
-            if (SDL_LockTexture(waterfallTexture, NULL, &pixels, &pitch) < 0) {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't lock texture: %s\n", SDL_GetError());
-                return;
-            }
-
-            for(int i=0;i<batch;++i){
-                auto dst = (std::uint32_t*)((std::uint8_t*)pixels + i * pitch);
-                for(int j=0;j<nch;++j){
-                    std::uint32_t color=rainbow(dd[idx++], min_value, max_value);
-                    *dst++=color;
-                }
-            }
-            SDL_UnlockTexture(waterfallTexture);
-
-            SDL_RenderClear(renderer);
-            SDL_RenderCopy(renderer, waterfallTexture, NULL, NULL);
-            SDL_RenderPresent(renderer);
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        }
-
-        SDL_DestroyRenderer(renderer);
+        
     }
     );
 #endif
+
+    int shmid_daq_info = shmget(daq_info_key,sizeof(DaqInfo),0666|IPC_CREAT);
+    int shmid_payload = shmget(payload_key, sizeof(float)*nch*batch*nbatch, 0666|IPC_CREAT);
+    assert(shmid_daq_info!=-1);
+    assert(shmid_payload!=-1);
+    DaqInfo* pdaq_info=(DaqInfo*) shmat(shmid_daq_info,(void*)0,0);
+    float* waterfall_payload_buf=(float*) shmat(shmid_payload, (void*)0, 0);
+    pdaq_info->nch=nch;
+    pdaq_info->batch=batch;
+    pdaq_info->nbatch=nbatch;
+    pdaq_info->init_magic=INIT_MAGIC;
+    auto handler=[&](const DataFrame& df){
+        //std::vector<float> ampl(df.payload.size());
+        int cnt=df.count;
+        float* base_ptr=waterfall_payload_buf+nch*batch*(cnt%nbatch);
+        for(int i=0;i<df.payload.size();++i){
+            base_ptr[i]=std::norm(df.payload[i]);
+        }
+    };
     
     std::thread th_proc([&]{
-        
-        stop_signal_called=false;
-        std::cerr<<stop_signal_called<<std::endl;
-        int n[]={(int)nch};
-        int howmany=batch;
-        int idist=nch;
-        int odist=nch;
-        int istride=1;
-        int ostride=1;
-        int* inembed=n;
-        int* onembed=n;
-        int rank=1;
-        fftwf_plan plan=fftwf_plan_many_dft(rank, n, howmany,
-                             nullptr, inembed,
-                             istride, idist,
-                             nullptr, onembed,
-                             ostride, odist,
-                             FFTW_FORWARD, FFTW_ESTIMATE);
-
-
-        
-        size_t prev_cnt=0;
-
-        for(int i=0;!stop_signal_called;++i){
-            auto data=bufq.fetch();
-            if (data->count>prev_cnt+1){
-                std::cerr<<"Dropping packet"<<std::endl;
-            }
-            
-            prev_cnt=data->count;
-            fftwf_execute_dft(plan, (fftwf_complex*)data->payload.data(), (fftwf_complex*)data->payload.data());
-            fft_shift(data->payload, nch, batch);
-            auto display_data=minmax(data->payload);
-
-            auto pbuf=display_data_q.prepare_write_buf();
-            std::get<0>(*pbuf)=std::get<0>(display_data);
-            std::get<1>(*pbuf)=std::get<1>(display_data);
-            std::get<2>(*pbuf).swap(std::get<2>(display_data));
-            display_data_q.submit();
-
-            std::cerr<<i<<" "<<data->count<<" "<<std::get<0>(display_data)<<" "<<std::get<1>(display_data)<<std::endl;
-            
-        }
-        fftwf_destroy_plan(plan);
+        waterfall(bufq, nch, batch, stop_signal_called, handler);
     });
-
 
     std::thread th_acq([&]{
     for (size_t i=0;!stop_signal_called;++i) {
@@ -379,6 +245,11 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
 #ifdef SHOW_GUI
     th_display.join();
 #endif
+
+    shmdt(pdaq_info);
+    shmdt(waterfall_payload_buf);
+    shmctl(shmid_daq_info,IPC_RMID,NULL);
+    shmctl(shmid_payload,IPC_RMID,NULL);
 }
 
 typedef std::function<uhd::sensor_value_t(const std::string&)> get_sensor_fn_t;
@@ -430,6 +301,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     // variables to be set by po
     std::string args, ant, subdev, ref, wirefmt;
     size_t channel, nch, batch;
+    size_t display_buf_nbatch;
     double rate, freq, gain, bw, setup_time, lo_offset;
 
     // setup the program options
@@ -440,6 +312,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("args", po::value<std::string>(&args)->default_value(""), "multi uhd device address args")
         ("nch", po::value<size_t>(&nch)->default_value(1024), "num of chs")
         ("batch", po::value<size_t>(&batch)->default_value(32), "num of batches")
+        ("nbatch", po::value<size_t>(&display_buf_nbatch)->default_value(1), "number of batches in display buf")
         ("rate", po::value<double>(&rate)->default_value(1e6), "rate of incoming samples")
         ("freq", po::value<double>(&freq)->default_value(0.0), "RF center frequency in Hz")
         ("lo-offset", po::value<double>(&lo_offset)->default_value(0.0),
@@ -476,6 +349,8 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
               << std::endl;
     uhd::usrp::multi_usrp::sptr usrp = uhd::usrp::multi_usrp::make(args);
 
+
+
     // Lock mboard clocks
     if (vm.count("ref")) {
         usrp->set_clock_source(ref);
@@ -492,6 +367,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         std::cerr << "Please specify a valid sample rate" << std::endl;
         return ~0;
     }
+
     std::cout << boost::format("Setting RX Rate: %f Msps...") % (rate / 1e6) << std::endl;
     usrp->set_rx_rate(rate, channel);
     std::cout << boost::format("Actual RX Rate: %f Msps...")
@@ -577,7 +453,8 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         wirefmt,                  \
         channel,                  \
         nch, 
-        batch
+        batch,
+        display_buf_nbatch
         );
 
 

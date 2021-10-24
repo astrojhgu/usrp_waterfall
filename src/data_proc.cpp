@@ -1,7 +1,7 @@
-#include "data_proc.hpp"
 #include <fftw3.h>
 #include <atomic>
-#include "utils.hpp"
+#include <utils.hpp>
+#include <data_proc.hpp>
 
 void waterfall(BufQ<DataFrame>& bufq, size_t nch, size_t batch, std::atomic_bool& stop_signal_called, std::function<void(const DataFrame&)> handler){
     stop_signal_called=false;
@@ -33,7 +33,10 @@ void waterfall(BufQ<DataFrame>& bufq, size_t nch, size_t batch, std::atomic_bool
         prev_cnt=data->count;
         fftwf_execute_dft(plan, (fftwf_complex*)data->payload.data(), (fftwf_complex*)data->payload.data());
         fft_shift(data->payload, nch, batch);
-        std::cerr<<i<<" "<<data->count<<std::endl;
+        if(i%100==0){
+            std::cerr<<i<<" "<<data->count<<std::endl;
+        }
+        
         handler(*data);
     }
     fftwf_destroy_plan(plan);

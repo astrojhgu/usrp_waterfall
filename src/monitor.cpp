@@ -9,8 +9,8 @@
 #include <chrono>
 #include <thread>
 #include <cassert>
-#include "config.hpp"
-#include "shm_info.hpp"
+#include <config.hpp>
+#include <shm_info.hpp>
 namespace po = boost::program_options;
 
 std::uint32_t rainbow(SAMP_TYPE x, SAMP_TYPE xmin, SAMP_TYPE xmax){

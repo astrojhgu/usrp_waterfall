@@ -24,12 +24,12 @@
 #include <thread>
 #include <fftw3.h>
 
-#include "bufq.hpp"
-#include "config.hpp"
-#include "daq_queue.hpp"
-#include "utils.hpp"
-#include "data_proc.hpp"
-#include "shm_info.hpp"
+#include <bufq.hpp>
+#include <config.hpp>
+#include <daq_queue.hpp>
+#include <utils.hpp>
+#include <data_proc.hpp>
+#include <shm_info.hpp>
 #include <functional>
 namespace po = boost::program_options;
 

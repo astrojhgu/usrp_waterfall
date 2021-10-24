@@ -3,7 +3,7 @@
 #include <complex>
 #include <vector>
 #include <tuple>
-#include "config.hpp"
+#include <config.hpp>
 
 
 std::tuple<float,float, std::vector<SAMP_TYPE>> minmax(const std::vector<std::complex<SAMP_TYPE>>& data){

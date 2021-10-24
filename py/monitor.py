@@ -43,6 +43,7 @@ bw=daq_info.bw
 nch=daq_info.nch
 raw_data=sysv_ipc.SharedMemory(key_payload)
 buffer=np.frombuffer(raw_data, dtype=np.float32).reshape((-1, nch))
+
 fig = plt.figure()
 
 rate=bw
@@ -50,11 +51,10 @@ dt=1/bw*nch
 fmin=(fcenter-bw/2)/1e6
 fmax=(fcenter+bw/2)/1e6
 
-im = plt.imshow(buffer, animated=True, aspect='auto', extent=[fmin, fmax, dt*buffer.shape[1], 0])
+im = plt.imshow(buffer, animated=True, aspect='auto', extent=[fmin, fmax, dt*buffer.shape[0], 0])
 def updatefig(*args):
     im.set_array(buffer)
     return im,
 
 ani = animation.FuncAnimation(fig, updatefig, interval=5, blit=True)
 plt.show()
-

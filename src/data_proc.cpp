@@ -3,7 +3,7 @@
 #include <utils.hpp>
 #include <data_proc.hpp>
 
-void waterfall(BufQ<DataFrame>& bufq, size_t nch, size_t batch, std::atomic_bool& stop_signal_called, std::function<void(const DataFrame&)> handler){
+void waterfall(BufQ<DataFrame>& bufq, size_t nch, size_t batch, std::atomic_bool& stop_signal_called, std::function<void(const DataFrame&)> handler_f, std::function<void(const DataFrame&)> handler_t){
     stop_signal_called=false;
     std::cerr<<stop_signal_called<<std::endl;
     int n[]={(int)nch};
@@ -26,6 +26,7 @@ void waterfall(BufQ<DataFrame>& bufq, size_t nch, size_t batch, std::atomic_bool
 
     for(int i=0;!stop_signal_called;++i){
         auto data=bufq.fetch();
+        handler_t(*data);
         if (data->count>prev_cnt+1){
             std::cerr<<"Dropping packet"<<std::endl;
         }
@@ -37,7 +38,7 @@ void waterfall(BufQ<DataFrame>& bufq, size_t nch, size_t batch, std::atomic_bool
             std::cerr<<i<<" "<<data->count<<std::endl;
         }
         
-        handler(*data);
+        handler_f(*data);
     }
     fftwf_destroy_plan(plan);
 }

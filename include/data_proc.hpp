@@ -4,5 +4,5 @@
 #include "bufq.hpp"
 #include "daq_queue.hpp"
 
-void waterfall(BufQ<DataFrame>& bufq, size_t nch, size_t batch, std::atomic_bool& stop_signal_called, std::function<void(const DataFrame&)> handler);
+void waterfall(BufQ<DataFrame>& bufq, size_t nch, size_t batch, std::atomic_bool& stop_signal_called, std::function<void(const DataFrame&)> handler_f, std::function<void(const DataFrame&)> handler_t=[](const DataFrame&){});
 #endif

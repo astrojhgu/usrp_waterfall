@@ -100,7 +100,8 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
     size_t batch, 
     size_t nbatch,
     float fcenter,
-    float bw
+    float bw, 
+    const std::string& time_domain_dump_name=""
     )
 {
     size_t samps_per_buff=nch*batch;
@@ -159,7 +160,21 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
     pdaq_info->fcenter=fcenter;
     pdaq_info->bw=bw;
 
-    auto handler=[&](const DataFrame& df){
+    std::function<void(const DataFrame&)> handler_t;
+    std::ofstream time_domain_dump_file;
+    if(time_domain_dump_name.empty()){
+        handler_t=[](const DataFrame&){};
+    }else{
+        std::cerr<<"a"<<std::endl;
+        time_domain_dump_file.open(time_domain_dump_name.c_str());
+        handler_t=[&](const DataFrame& df){
+            time_domain_dump_file.write((char*)df.payload.data(), df.payload.size()*sizeof(std::complex<SAMP_TYPE>));
+            //time_domain_dump_file.flush();
+        };
+    }
+    
+
+    auto handler_f=[&](const DataFrame& df){
         //std::vector<float> ampl(df.payload.size());
         int cnt=df.count;
         float* base_ptr=waterfall_payload_buf+nch*batch*(cnt%nbatch);
@@ -169,7 +184,7 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
     };
     
     std::thread th_proc([&]{
-        waterfall(bufq, nch, batch, stop_signal_called, handler);
+        waterfall(bufq, nch, batch, stop_signal_called, handler_f, handler_t);
     });
 
     std::thread th_acq([&]{
@@ -296,7 +311,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
     size_t channel, nch, batch;
     size_t display_buf_nbatch;
     double rate, freq, gain, bw, setup_time, lo_offset;
-
+    std::string tdump;
     // setup the program options
     po::options_description desc("Allowed options");
     // clang-format off
@@ -318,6 +333,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("ref", po::value<std::string>(&ref)->default_value("internal"), "reference source (internal, external, mimo)")
         ("wirefmt", po::value<std::string>(&wirefmt)->default_value("sc8"), "wire format (sc8, sc16 or s16)")
         ("setup", po::value<double>(&setup_time)->default_value(1.0), "seconds of setup time")
+        ("tdump", po::value<std::string>(&tdump)->default_value(""), "dump time domain file")
         ("skip-lo", "skip checking LO lock status")
         ("int-n", "tune USRP with integer-N tuning")
     ;
@@ -449,7 +465,8 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         batch,
         display_buf_nbatch,
         freq,
-        rate
+        rate,
+        tdump
         );
 
 

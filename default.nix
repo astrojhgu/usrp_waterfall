@@ -15,6 +15,7 @@ stdenv.mkDerivation {
     matplotlib
     ipython
     sysv_ipc
+    pyqt5
      ]))
     ];
 }

@@ -45,7 +45,7 @@ In one console run
 ./build/rt_waterfall --rate 61.44e6 --freq 100e6 --nch 2048 --batch 32 --wirefmt sc8 --gain 10 --args 'name=MyB210' --bw 40e6 --nbatch 64
 ```
 
-The `--args 'name=MyB210'` is option when there is only one USRP device connected to the host.
+The `--args 'name=MyB210'` is optional when there is only one USRP device connected to the host.
 It is written based on the UHD host example `rx_sample_to_file.cpp`
 
 ### Then run the monitoring program

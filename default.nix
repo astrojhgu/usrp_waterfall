@@ -8,6 +8,13 @@ stdenv.mkDerivation {
     fftwFloat.dev
     boost
     uhd
+    libusb
+    udev.dev
+    libatomic_ops
+    freeglut
+    freeglut.out
+    libsForQt5.qt5.qtwayland
+
     (python3.withPackages (ps: with ps; [
     pip
     numpy
@@ -18,4 +25,7 @@ stdenv.mkDerivation {
     pyqt5
      ]))
     ];
+    LIBCLANG_PATH = llvmPackages.libclang.lib+"/lib";
+    LD_LIBRARY_PATH= libGL+"/lib";
+    QT_QPA_PLATFORM="wayland";
 }

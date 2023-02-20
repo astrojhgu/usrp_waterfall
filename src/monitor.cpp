@@ -3,7 +3,7 @@
 #include <boost/format.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/program_options.hpp>
-
+#include <atomic>
 #include <SDL2/SDL.h>
 #include <iostream>
 #include <chrono>
@@ -99,7 +99,7 @@ int main(int argc, char* argv[]){
         return ~0;
     }
 
-    std::atomic_bool stop(false);
+    std::atomic<bool> stop=false;
     for(int i=0;!stop;++i)
     {
         std::cerr<<i<<std::endl;

@@ -1,9 +1,12 @@
-TARGETS=build/rt_waterfall build/monitor
+TARGETS=build/rt_waterfall #build/monitor
 all: $(TARGETS)
 
-LIBS=-luhd -lboost_program_options -pthread -ldl -lfftw3f `pkg-config --libs sdl2`
-INC=-I ./include `pkg-config --cflags sdl2`
+#LIBS=-luhd -lboost_program_options -lboost_date_time -lboost_filesystem -lboost_serialization -lboost_thread -lboost_unit_test_framework -lboost_system  -lboost_atomic `pkg-config --libs libusb-1.0` -lboost_chrono -pthread -ldl -lfftw3f `pkg-config --libs sdl2`
+#INC=-I ./include `pkg-config --cflags sdl2`
 
+
+LIBS=-luhd -lboost_program_options -lboost_date_time -lboost_filesystem -lboost_serialization -lboost_thread -lboost_unit_test_framework -lboost_system  -lboost_atomic `pkg-config --libs libusb-1.0` -lboost_chrono -pthread -ldl -lfftw3f `pkg-config --libs libudev` -latomic -lrt `pkg-config --libs sdl2`
+INC=-I ./include `pkg-config --cflags sdl2`
 
 obj/data_proc.o: src/data_proc.cpp include/data_proc.hpp |obj
 	g++ -c -o $@ $< -O3 -g $(INC)

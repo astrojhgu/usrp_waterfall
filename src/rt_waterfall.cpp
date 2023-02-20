@@ -195,6 +195,7 @@ void recv_and_proc(uhd::usrp::multi_usrp::sptr usrp,
 
         size_t num_rx_samps =
             rx_stream->recv(&pbuf->payload.front(), pbuf->payload.size(), md, 1, false);
+        
         bufq.submit();
 
         if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) {
@@ -322,7 +323,7 @@ int UHD_SAFE_MAIN(int argc, char* argv[])
         ("batch", po::value<size_t>(&batch)->default_value(32), "num of batches")
         ("nbatch", po::value<size_t>(&display_buf_nbatch)->default_value(1), "number of batches in display buf")
         ("rate", po::value<double>(&rate)->default_value(1e6), "rate of incoming samples")
-        ("freq", po::value<double>(&freq)->default_value(0.0), "RF center frequency in Hz")
+        ("freq", po::value<double>(&freq)->default_value(103.9e6), "RF center frequency in Hz")
         ("lo-offset", po::value<double>(&lo_offset)->default_value(0.0),
             "Offset for frontend LO in Hz (optional)")
         ("gain", po::value<double>(&gain), "gain for the RF chain")
